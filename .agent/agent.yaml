@@ -1,0 +1,140 @@
+# 优小宝智能寄存柜 · Agent 配置
+# 机器可读版本，供自动化脚本与 IDE 插件解析；人类阅读请优先看 AGENTS.md
+
+project:
+  name: 优小宝智能寄存柜
+  phase: 一期
+  root: D:/Desktop/寄存柜
+  workdir: D:/Desktop/寄存柜/gin-master
+  agent_dir: D:/Desktop/寄存柜/gin-master/.agent
+  status: 开发前准备完成，待进入开发
+  owner: 客户（业务）+ 研发（实现）
+
+repos:
+  - id: backend
+    path: D:/Desktop/寄存柜/gin-master
+    remote: https://github.com/ovo133838-lang/locker.git
+    base: gin-gonic/gin v1.12.0
+    branch: dev
+    lang: go
+  - id: admin
+    path: D:/Desktop/寄存柜/vue-element-admin-master
+    remote: https://github.com/ovo133838-lang/locker-Backend.git
+    base: PanJiaChen/vue-element-admin 4.4.0
+    branch: dev
+    lang: javascript
+  - id: miniprogram
+    path: D:/Desktop/寄存柜/gin-master/miniprogram
+    remote: null
+    base: 微信小程序原生
+    branch: dev
+    lang: javascript
+
+stack:
+  backend:
+    language: go
+    version: "1.26"
+    http: "github.com/gin-gonic/gin v1.12.0"
+    orm: gorm.io/gorm v1.25
+    db: mysql 8.0
+    cache: redis 7.x
+  miniprogram:
+    framework: wechat-native
+    forbidden: [uni-app, taro, vue3]
+  admin:
+    framework: vue-element-admin
+    version: "4.4.0"
+    vue: "2.6.10"
+    ui: "element-ui 2.13.2"
+    router: "vue-router 3.0.2"
+    store: "vuex 3.1.0"
+    build: "vue-cli-service"
+    dev_port: 9527
+    base_api_env: VUE_APP_BASE_API
+    forbidden: [vue3, element-plus, pinia]
+
+architecture:
+  mode: modular-monolith
+  entry: cmd/api
+  layers: [handler, service, repository, model]
+  adapters: [cabinet]
+  jobs:
+    - {name: timeout-scan, cron: "* * * * *", desc: 计划时长到期置已超时}
+    - {name: pay-timeout-cancel, cron: "* * * * *", desc: 15 分钟未支付取消并释放格口}
+    - {name: offline-detect, cron: "* * * * *", desc: 心跳超 3 分钟置离线并产生异常}
+    - {name: overview-sync, cron: "*/5 * * * *", desc: 概览数据写 Redis}
+
+modules: [auth, site, order, billing, cabinet, alert, stats, notify]
+
+scope:
+  c_end:
+    pages: 10
+    features: FR-C-01..FR-C-10
+    routes: [home, spot/:id, pay, open/:id, order/:id, orders, me, coupons, guide]
+  b_end:
+    pages: 9
+    features: FR-B-01..FR-B-11
+    routes: [login, dashboard, sites, site/:id, cells, orders, order/:id, revenue, alerts, pricing]
+  device:
+    interfaces: 5
+    protocol: http-pull-with-hmac
+  excluded: [会员储值, 优惠券发放, 电子发票, 评价工单, 跨城调度, 广告位]
+
+contracts:
+  api_count: 59
+  api_split: {c: 24, b: 30, device: 5}
+  error_codes: 17
+  tables: 13
+  money_unit: fen
+  money_note: 存储与传输用分，展示转元；需求说明书正文的「元」为展示口径
+  time_format: rfc3339
+  idempotency_keys:
+    create_order: request_id
+    open_door: request_id
+    pay_notify: trade_no
+    door_result: order_id+request_id
+
+hard_constraints:
+  - id: HC1
+    rule: 金额以分为单位的整数
+  - id: HC2
+    rule: 下单写规则快照，订单生命周期只读快照
+  - id: HC3
+    rule: 一格口同时仅一笔进行中订单，用条件更新保证
+  - id: HC4
+    rule: 开门必须等柜体回执，未回执不得置进行中
+  - id: HC5
+    rule: 支付与柜体回调幂等，靠唯一索引
+
+gates:
+  S1: 需求 FR 全部有页面与规则
+  S2: 原型 C10+B9 可点通、金额可复算
+  S3: WBS 15 项、32.5 人日、M1-M7 判定明确
+  S4: 各里程碑可独立验收
+  S5: 计费 14 算例全绿、覆盖率>=70、P0 静态扫描为零
+  S6: AC-01..AC-16 通过、不变量 SQL 无非空
+  S7: 生产真实开门与真实退款各一次
+
+checker:
+  skill: locker-check
+  scripts: [scan_project.py, check_billing.py, api_smoke.py, make_report.py]
+  exit_codes: {0: pass, 1: p0_found, 2: env_unmet}
+  blocking: [float-money, case-mismatch, hardcoded-secret, duplicate-active-order, cross-site-access, stub-response]
+
+docs:
+  requirements: ../优小宝智能寄存柜_业务需求说明书.docx
+  api: ../智能寄存柜_接口文档.docx
+  data: ../智能寄存柜_数据字典.docx
+  plan: ../智能寄存柜_开发前准备_v2.docx
+  prototype: ../优小宝寄存柜原型.html
+
+open_questions:
+  - {id: Q1, item: 押金是否统一, owner: 客户, default: 按柜型差异化}
+  - {id: Q2, item: 超时能否先取后付, owner: 客户, default: 不允许，先补交后开门}
+  - {id: Q3, item: 非营业时间能否寄存, owner: 客户, default: 不开放新单，已存可随时取}
+  - {id: Q4, item: 是否开票, owner: 客户, default: 一期不开}
+  - {id: Q5, item: 柜体协议与回执字段, owner: 设备方, default: request_id + 结果码 + 时间}
+  - {id: Q6, item: 是否面向外籍用户, owner: 客户, default: 一期仅中文与大陆手机号}
+  - {id: Q7, item: 后台基座 Vue2 还是 Vue3, owner: 客户, default: 沿用 Vue2 基座}
+  - {id: Q8, item: 按日模式的日单价, owner: 客户, default: S15/M25/L30 元（来自原型，需求书表 3-2 未列）}
+  - {id: Q9, item: 12 分钟算例与 10 分钟免费规则冲突, owner: 客户, default: 按 10 分钟免费实现，12 分钟计 140 分}
